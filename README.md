@@ -61,13 +61,13 @@ initcos_module(void)
 接下来需要一个`setup.py`：
 
 ```python
-    from distutils.core import setup, Extension
-    
-    # define the extension module
-    cos_module = Extension('cos_module', sources=['cos_module.c'])
-    
-    # run the setup
-    setup(ext_modules=[cos_module])
+from distutils.core import setup, Extension
+
+# define the extension module
+cos_module = Extension('cos_module', sources=['cos_module.c'])
+
+# run the setup
+setup(ext_modules=[cos_module])
 ```
 
 Extension自身还有很多选项，例如gcc中的-I，功能`include_dirs=[numpy.get_include()]`等等。这里就不展开了，基本上gcc能设置的选项在Extension初始化中都可以加入，没有设置的就是默认值，接下来运行`python setup.py build_ext --inplace`，输出完整的gcc命令，我们分析一下是如何完成编译的：
@@ -181,18 +181,90 @@ running build_ext
 cythoning cos_module.pyx to cos_module.c # 这里把cython编译为c
 building 'cos_module' extension
 gcc -pthread -B /usr/share/Anaconda3/compiler_compat -Wl,--sysroot=/ -Wsign-compare -DNDEBUG -g -fwrapv -O3 -Wall -Wstrict-prototypes -fPIC -I/usr/share/Anaconda3/include/python3.6m -c cos_module.c -o build/temp.linux-x86_64-3.6/cos_module.o # 编译.o中间文件
-gcc -pthread -shared -B /usr/share/Anaconda3/compiler_compat -L/usr/share/Anaconda3/lib -Wl,-rpath=/usr/share/Anaconda3/lib -Wl,--no-as-needed -Wl,--sysroot=/ build/temp.linux-x86_64-3.6/cos_module.o -L/usr/share/Anaconda3/lib -lpython3.6m -o /home/prince/tmp/cpython/cython/cos_module.cpython-36m-x86_64-linux-gnu.so # 编译最终的.so文件
+gcc -pthread -shared -B /usr/share/Anaconda3/compiler_compat -L/usr/share/Anaconda3/lib -Wl,-rpath=/usr/share/Anaconda3/lib -Wl,--no-as-needed -Wl,--sysroot=/ build/temp.linux-x86_64-3.6/cos_module.o -L/usr/share/Anaconda3/lib -lpython3.6m -o /home/xxx/tmp/cpython/cython/cos_module.cpython-36m-x86_64-linux-gnu.so # 编译最终的.so文件
 ```
 
 与第一小节最明显的差别在于，使用cython方法会先在当前目录编译出一个cos_module.c，这个c文件里面的内容是比较难懂的，不过如果仔细读他，可以发现本质上就是使用了C-API，最后再按照C-API的编译方法，把c编译为一个python可读的so，最后，和第一小节一样执行`from cos_module import cos_func`就可以了。
 
-### 踩坑
+### Cython踩坑
 
 这里还有一个坑，就是setup.py中的module名称必须和pyx的文件名一致，Extension("cos_module", ["cos_module.pyx"])，否则编译没有问题，但是在运行时刻会报错
 
 ```
 dynamic module does not define module export function (XXX)
 ```
+
+### Cython和NumPy
+
+由于工作中经常使用Numpy，大部分时候向量化的重复操作，如矩阵求he等等都可以用Numpy进行，而且速度也非常之快，但一些时候在面对强依赖的循环并涉及大量单个元素的操作的时候（一个例子就是目标检测算法中的非极大值抑制算法），Numpy就显得力不从心了，这个时候，使用Cython加速往往是一个不错的选择。因此本节说一下如何在Cython加速Numpy。
+
+核心思想是将Numpy array变为一个连续的存储，比如一个np.array(dtype=int)，就把它变成C语言的int []，然后写一个c函数，通过pyx文件调用这个函数，其中最关键的语句是`np.PyArray_DATA(in_array)`，将numpy array变成指针的过程。接下来我们实现刚才的cos_func对一个数组操作的代码：
+
+1. 首先写一个c，我们让他的输入是一个double的数组in_array，然后给出一个输出是out_array，也是一个数组（这是c语言风格的返回方法），然后给定数组的长度，实现起来很容易，对数组的每一个元素操作就可以了。
+
+```c
+#include <math.h>
+
+/*  Compute the cosine of each element in in_array, storing the result in
+ *  out_array. */
+void cos_doubles(double * in_array, double * out_array, int size){
+    int i;
+    for(i=0;i<size;i++){
+        out_array[i] = cos(in_array[i]);
+    }
+}
+```
+
+2. 别忘了要写一个头文件`cos_doubles.h`
+
+```c
+void cos_doubles(double * in_array, double * out_array, int size);
+```
+
+3. 通过Cython引入这个c函数
+
+```cython
+""" Example of wrapping a C function that takes C double arrays as input using
+    the Numpy declarations from Cython """
+
+# import both numpy and the Cython declarations for numpy
+import numpy as np
+cimport numpy as np
+
+# if you want to use the Numpy-C-API from Cython
+# (not strictly necessary for this example)
+np.import_array()
+
+# cdefine the signature of our c function
+cdef extern from "cos_doubles.h": # 调用一下刚才写的头文件定义函数申明
+    void cos_doubles (double * in_array, double * out_array, int size)
+
+# create the wrapper code, with numpy type annotations
+def cos_doubles_func(np.ndarray[double, ndim=1, mode="c"] in_array not None,
+                     np.ndarray[double, ndim=1, mode="c"] out_array not None):
+    
+    # 使用np.PyArray_DATA()把numpy的数据转换为一个指针传给c函数，注意numpy的类型匹配
+    cos_doubles(<double*> np.PyArray_DATA(in_array),
+                <double*> np.PyArray_DATA(out_array),
+                in_array.shape[0])
+```
+
+4. 通过`setup.py`编译
+
+```python
+from distutils.core import setup, Extension
+import numpy
+from Cython.Distutils import build_ext
+
+setup(
+    cmdclass={'build_ext': build_ext},
+    ext_modules=[Extension("cos_doubles",
+                 sources=["_cos_doubles.pyx", "cos_doubles.c"], # 这里写上c的源文件路径
+                 include_dirs=[numpy.get_include()])],  # 由于这里需要引入numpy的一些库，所以这里必须加上include_dir=[numpy.get_include()]，相当于gcc -I XXX 的功能
+)
+```
+
+最后就是和上面一样执行build_ext就能获得一个`cos_doubles`的python module，通过`cos_doubles.cos_doubles_func(input, output)`来调用这个python函数，达到加速的目的。
 
 ### 总结
 
