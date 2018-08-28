@@ -147,6 +147,14 @@ def cos_func(x):
 
 要注意的就是在加载完so以后，其实python是不知道函数的定义的，也就是输入参数和返回值的类型都必须由python手动指定，上面代码中的`argtypes`和`restype`就是为了这个。在完成这个之后，就可以在别的py中`from cos import cos_func`来使用这个包裹函数。
 
+### Ctypes与Python类型对应
+
+ctypes的中内置了基本的C类型，包括`c_int`,`c_float`,`c_double`等等，这里有一张对应表：
+
+![](http://oodo7tmt3.bkt.clouddn.com/blog_20180828214008.png)
+
+可以使用`x = ctypes.cast(0.5,c_float)`来进行转换，需要注意的是，经常使用的python字符串在python2里面是ascii码，但是在python3中string默认编码是utf-8，直接使用`ctypes.cast(s, c_char_p])`会失败，因此需要先把s编码为ascii然后再进行转换，或者使用b'Hello'这样的二进制字符串也是可以的。
+
 #### ctypes中使用结构体
 
 有时候在ctypes中需要使用结构体，这个时候，我们需要在python中先声明一下这个结构体，然后就可以像普通的c类型一样使用这个结构体了，下面是官网的一个例子：
