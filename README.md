@@ -121,7 +121,7 @@ double cos_func(double a) {
 然后将其编译为so文件：
 
 ```shell
-    gcc func.c -shared -fPIC -o libcos.so -lm func.c
+$ gcc func.c -shared -fPIC -o libcos.so -lm func.c
 ```
 
 在当前目录产生一个libcos.so，注意这里要加一个-lm选项，是为了把静态库libm.a，也就是math.h对应的实现引进来。
@@ -147,11 +147,36 @@ def cos_func(x):
 
 要注意的就是在加载完so以后，其实python是不知道函数的定义的，也就是输入参数和返回值的类型都必须由python手动指定，上面代码中的`argtypes`和`restype`就是为了这个。在完成这个之后，就可以在别的py中`from cos import cos_func`来使用这个包裹函数。
 
-使用Ctypes扩展python的好处在于，在c端是纯粹的c，没有和python挂钩的其他包，这种方法的扩展性比较好，python2，python3通用，不过需要自己手动设定参数和返回值，比较麻烦，尤其是c文件中如果涉及结构体，指针等操作，申明起来工作量非常大。所以推荐如果是已经有了一个so，希望使用ctypes包裹的话，还是先用c包装一下，暴露出比较简明的接口，比如字符串，整型的api，然后再使用c去调用，这样能够有效降低python端的工作量。
+#### ctypes中使用结构体
+
+有时候在ctypes中需要使用结构体，这个时候，我们需要在python中先声明一下这个结构体，然后就可以像普通的c类型一样使用这个结构体了，下面是官网的一个例子：
+
+首先C代码中给出某个结构体的定义：
+```C
+typedef Struct{
+    int x;
+    int y;
+} POINT;
+```
+
+在Python中声明这个结构体：
+```python
+from ctypes import *
+class POINT(Structure):
+   _fields_ = [("x", c_int), #在这里声明结构体中的域
+               ("y", c_int)]
+point = POINT(10, 20)
+```
+
+如果有使用到结构体，需要像上一小节一样，使用`lib.cos_func.argtypes`和`lib.cos_func.restype`设置到参数和返回值类型中，最后调用。
+
+#### Ctypes总结
+
+使用Ctypes扩展python的好处在于，在C端是纯粹的C，没有和python挂钩的其他包（如果有用到Numpy之类的包除外），这种方法的扩展性比较好，python2，python3通用，不过需要自己手动设定参数和返回值，比较麻烦，尤其是c文件中如果涉及结构体，指针等操作，声明起来工作量非常大。所以推荐如果是已经有了一个so，希望使用ctypes包裹的话，还是先用c包装一下，暴露出比较简明的接口，比如字符串，整型的api，然后再使用c去调用，这样能够有效降低python端的工作量。
 
 ### Cython
 
-Cython的原理其实和第一种方法C-API非常相似，实质上Cython是一种特殊的语法，包含了python的全部语法，并使用一些类c的语法对python进行扩展，比如cdef，cimport等等，其原理就是把pyx脚本编译为C-API描述的c语言，然后再把c语言使用第一小节讲到的方法编译成so，使python能够直接import，以下是一个比较简单的cos_module.pyx:
+Cython的原理其实和第一种方法C-API非常相似，实质上Cython是一种特殊的语法，包含了python的全部语法，并使用一些类c的语法对python进行扩展，比如cdef，cimport等等，其原理就是把pyx脚本编译为C-API描述的c语言，然后再把c语言使用第一小节讲到的方法编译成so，使python能够直接import，以下是一个比较简单的`cos_module.pyx`:
 
 ```python
 """ Example of wrapping cos function from math.h using Cython. """
@@ -185,6 +210,12 @@ gcc -pthread -shared -B /usr/share/Anaconda3/compiler_compat -L/usr/share/Anacon
 ```
 
 与第一小节最明显的差别在于，使用cython方法会先在当前目录编译出一个cos_module.c，这个c文件里面的内容是比较难懂的，不过如果仔细读他，可以发现本质上就是使用了C-API，最后再按照C-API的编译方法，把c编译为一个python可读的so，最后，和第一小节一样执行`from cos_module import cos_func`就可以了。
+
+### 可视化Cython加速
+
+通过`cython -a cos_module.pyx`命令可以获得一个`cos_module.html`文件，打开这个文件，可以看到颜色越黄，这个地方就和python的交互越多，性能也就越差（这个例子比较简单，所以效果不明显）
+
+![](http://oodo7tmt3.bkt.clouddn.com/blog_20180828212556.png)
 
 ### Cython踩坑
 
@@ -236,7 +267,7 @@ cimport numpy as np
 np.import_array()
 
 # cdefine the signature of our c function
-cdef extern from "cos_doubles.h": # 调用一下刚才写的头文件定义函数申明
+cdef extern from "cos_doubles.h": # 调用一下刚才写的头文件定义函数声明
     void cos_doubles (double * in_array, double * out_array, int size)
 
 # create the wrapper code, with numpy type annotations
