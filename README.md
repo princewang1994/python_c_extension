@@ -223,7 +223,7 @@ gcc -pthread -shared -B /usr/share/Anaconda3/compiler_compat -L/usr/share/Anacon
 
 通过`cython -a cos_module.pyx`命令可以获得一个`cos_module.html`文件，打开这个文件，可以看到颜色越黄，这个地方就和python的交互越多，性能也就越差（这个例子比较简单，所以效果不明显）
 
-![](http://oodo7tmt3.bkt.clouddn.com/blog_20180828212556.png)
+![](http://princepicbed.oss-cn-beijing.aliyuncs.com/blog_20180828212556.png)
 
 ### Cython踩坑
 
